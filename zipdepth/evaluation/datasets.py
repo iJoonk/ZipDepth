@@ -5,6 +5,8 @@ ScanNet, and DIODE. Each entry in :data:`DATASET_CONFIGS` carries the depth
 range and protocol options (crops, evaluation masks) for that dataset.
 """
 
+import hashlib
+import json
 import logging
 from pathlib import Path
 from typing import Dict, List
@@ -149,6 +151,44 @@ def discover_samples(dataset: str, data_dir: str, domain: str = 'all') -> List[d
         raise ValueError(f"Unknown dataset: {dataset}")
     samples = finders[dataset](data_dir)
     logger.info(f"Found {len(samples)} {dataset} samples")
+    return samples
+
+
+def load_frozen_kitti_manifest(path: str, verify_hashes: bool = True) -> List[dict]:
+    """Load the exact 652-sample KITTI manifest and optionally verify bytes."""
+    manifest_path = Path(path)
+    document = json.loads(manifest_path.read_text(encoding='utf-8'))
+    if document.get('version') != 'kitti_eigen_652_zipdepth_eval_v1':
+        raise ValueError(f'Unsupported KITTI evaluation manifest: {manifest_path}')
+    records = document.get('records', [])
+    if document.get('sample_count') != 652 or len(records) != 652:
+        raise ValueError('Frozen KITTI evaluation manifest must contain exactly 652 samples')
+    sample_ids = [record['sample_id'] for record in records]
+    if len(set(sample_ids)) != 652:
+        raise ValueError('Frozen KITTI evaluation manifest contains duplicate samples')
+
+    def digest(source: Path) -> str:
+        hasher = hashlib.sha256()
+        with source.open('rb') as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    samples = []
+    for record in records:
+        image_path, depth_path = Path(record['image_path']), Path(record['depth_path'])
+        if not image_path.is_file() or not depth_path.is_file():
+            raise FileNotFoundError(f'Missing frozen KITTI sample: {record["sample_id"]}')
+        if verify_hashes:
+            if digest(image_path) != record['image_sha256']:
+                raise ValueError(f'Image SHA mismatch: {record["sample_id"]}')
+            if digest(depth_path) != record['depth_sha256']:
+                raise ValueError(f'Depth SHA mismatch: {record["sample_id"]}')
+        samples.append({
+            'image_path': str(image_path),
+            'depth_path': str(depth_path),
+            'name': record['sample_id'],
+        })
     return samples
 
 

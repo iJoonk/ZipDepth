@@ -20,6 +20,7 @@ import torch
 
 from zipdepth.inference.predictor import DepthInference
 from zipdepth.evaluation import DATASET_CONFIGS, discover_samples, evaluate
+from zipdepth.evaluation.datasets import load_frozen_kitti_manifest
 from zipdepth.evaluation.evaluator import print_results, save_results
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -33,6 +34,10 @@ def main():
                         help='Benchmark to evaluate on')
     parser.add_argument('--data_dir', type=str, required=True,
                         help='Path to the dataset root')
+    parser.add_argument('--manifest', type=str, default=None,
+                        help='Frozen KITTI Eigen-652 JSON manifest (overrides discovery)')
+    parser.add_argument('--no_manifest_hash_check', action='store_true',
+                        help='Skip file SHA checks for a frozen manifest')
     parser.add_argument('--checkpoint', type=str, required=True,
                         help='Path to the ZipDepth checkpoint (.pth)')
     parser.add_argument('--variant', type=str, default='base',
@@ -80,7 +85,14 @@ def main():
     if args.dataset == 'diode':
         cfg['domain'] = args.diode_domain
 
-    samples = discover_samples(args.dataset, args.data_dir, domain=args.diode_domain)
+    if args.manifest:
+        if args.dataset != 'kitti':
+            parser.error('--manifest is currently supported only for KITTI')
+        samples = load_frozen_kitti_manifest(
+            args.manifest, verify_hashes=not args.no_manifest_hash_check
+        )
+    else:
+        samples = discover_samples(args.dataset, args.data_dir, domain=args.diode_domain)
     if not samples:
         logging.error("No samples found — check --data_dir and the dataset layout.")
         sys.exit(1)

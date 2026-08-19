@@ -1,0 +1,18 @@
+{
+  "metadata": {
+    "dataset": "kitti",
+    "checkpoint": "checkpoints/zipdepth_base.pth",
+    "alignment": "least_square_disparity",
+    "timestamp": "2026-08-19 01:14:42"
+  },
+  "results": {
+    "abs_rel": 0.124093,
+    "sq_rel": 0.803042,
+    "rmse": 4.60049,
+    "rmse_log": 0.16499,
+    "log10": 0.052045,
+    "delta1": 0.861094,
+    "delta2": 0.976295,
+    "delta3": 0.994169
+  }
+}

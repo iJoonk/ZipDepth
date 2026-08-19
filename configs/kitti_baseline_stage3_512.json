@@ -1,0 +1,56 @@
+{
+  "protocol": "kitti_only_zipdepth_paper_v1",
+  "model": {
+    "variant": "base",
+    "upsample_unfold": true
+  },
+  "loss": {
+    "alpha_ssi": 1.0,
+    "alpha_grad": 2.0,
+    "grad_scales": 4
+  },
+  "data": {
+    "index_file": "data/kitti_baseline/kitti_train_phase10b.json",
+    "domains": ["kitti"],
+    "max_samples": null,
+    "height": 512,
+    "width": 512,
+    "strict_loading": true,
+    "balanced_sampling": false
+  },
+  "training": {
+    "stage": 3,
+    "initialization": "checkpoint",
+    "init_checkpoint": null,
+    "epochs": 3,
+    "batch_size": 48,
+    "expected_world_size": 2,
+    "num_workers": 8,
+    "seed": 2027,
+    "deterministic": true,
+    "compile": true,
+    "save_dir": "./checkpoints/kitti_only_vanilla/stage3_512",
+    "save_every_steps": 0,
+    "max_step_checkpoints": 2,
+    "max_steps": 0
+  },
+  "optimizer": {
+    "type": "adamw",
+    "lr": 0.00025,
+    "weight_decay": 0.05,
+    "scale_lr_with_gpus": false
+  },
+  "scheduler": {
+    "type": "half_epoch_warmup_cosine",
+    "warmup_fraction": 0.5,
+    "min_lr_ratio": 0.01
+  },
+  "amp": {
+    "enabled": true,
+    "dtype": "bfloat16"
+  },
+  "logging": {
+    "tensorboard": true,
+    "wandb": false
+  }
+}

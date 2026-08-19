@@ -1,0 +1,32 @@
+{
+  "cache_root": "/mnt/disk_new/joonk/home_reloc/projects/depth-compensation/outputs/phase10b_teacher_cache_dav2_l_float32_v1",
+  "cache_version": "phase10b_teacher_depth_v1",
+  "depth_format": "phase10b_dav2_l_float32_pt",
+  "depth_scale": 1.0,
+  "domains": [
+    "kitti"
+  ],
+  "source_cache_manifest": "/mnt/disk_new/joonk/home_reloc/projects/depth-compensation/outputs/phase10b_large_data_global_u2/data/teacher_cache_manifest.json",
+  "source_cache_manifest_sha256": "8b777354d0c6834eed5d216a2ff9a109b7d024bdd1f46d9239751b8113e82e47",
+  "source_resolved_train_manifest": "/mnt/disk_new/joonk/home_reloc/projects/depth-compensation/outputs/phase10b_large_data_global_u2/data/train_manifest_resolved.csv",
+  "source_resolved_train_manifest_sha256": "cd8b5e4627d3afa6b0d239e494a570ae7aa7d2a2164fa46052585f62bec4259a",
+  "strict_loading": true,
+  "teacher_identity": "233717585687e65a94f8b89203d7c317b59e542e0778c13a1d6a0921128f8e98",
+  "total_samples": 23158,
+  "verification": {
+    "all_cache_files_exist": true,
+    "all_float32_payloads_verified": true,
+    "all_image_sha256_match": true,
+    "all_rgb_files_exist": true,
+    "all_sample_ids_match": true,
+    "all_shapes_match": true,
+    "cache_file_count": 23158,
+    "pseudo_depth_global_max": 1378.9959716796875,
+    "pseudo_depth_global_min": 0.0,
+    "rgb_content_hashes_verified": true,
+    "sample_count": 23158,
+    "samples_exceeding_uint16_x256_range": 23158,
+    "unique_sample_id_count": 23158
+  },
+  "version": "kitti_only_zipdepth_train_index_v1"
+}

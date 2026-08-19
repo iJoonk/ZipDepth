@@ -59,6 +59,7 @@ class ZipDepthTrainer:
                 amp_dtype='bfloat16',
                 alpha_ssi: float = 1.0,
                 alpha_grad: float = 2.0,
+                compile_model: bool = True,
                 ):
         """
         Args:
@@ -119,8 +120,10 @@ class ZipDepthTrainer:
             else None
         )
 
-        # Compile student for faster iteration (PyTorch >= 2.0)
-        self.student = torch.compile(self.student, mode="reduce-overhead")
+        # Compile student for faster iteration (PyTorch >= 2.0).  The switch is
+        # useful for quick smoke/overfit diagnostics without changing weights.
+        if compile_model:
+            self.student = torch.compile(self.student, mode="reduce-overhead")
 
     def train(self, num_epochs: int, save_dir: str = './checkpoints', start_epoch: int = 0,
             save_every_steps: int = 0, max_step_checkpoints: int = 5, max_steps: int = 0):
@@ -296,7 +299,12 @@ class ZipDepthTrainer:
                 images = images.float() / 255.0
 
                 teacher_depth = batch['depth'].to(self.device, non_blocking=True)
-                teacher_depth = teacher_depth.float().div_(256.0)
+                depth_scale = batch.get('depth_scale', 256.0)
+                if torch.is_tensor(depth_scale):
+                    depth_scale = depth_scale.to(
+                        self.device, non_blocking=True, dtype=torch.float32
+                    ).view(-1, 1, 1, 1)
+                teacher_depth = teacher_depth.float().div_(depth_scale)
 
                 del batch
 

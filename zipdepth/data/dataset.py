@@ -27,10 +27,16 @@ class LargeScaleDepthDataset(Dataset):
                  index_file: str,
                  domains: Optional[List[str]] = None,
                  transform=None,
-                 max_samples: Optional[int] = None):
+                 max_samples: Optional[int] = None,
+                 strict_loading: Optional[bool] = None):
 
         self.transform = transform
-        self._jpeg = TurboJPEG()
+        try:
+            self._jpeg = TurboJPEG()
+        except RuntimeError:
+            # KITTI RGB is PNG.  Keep JPEG datasets usable through OpenCV when
+            # the optional system libturbojpeg is not installed.
+            self._jpeg = None
 
         index_path = Path(index_file)
         prefix = str(index_path.with_suffix(''))
@@ -45,6 +51,11 @@ class LargeScaleDepthDataset(Dataset):
                 f"Converted index not found: {rgb_file}\n"
                 f"Run: python scripts/prepare_index.py convert --input {index_file}"
             )
+
+        self.strict_loading = (
+            bool(self.index_metadata.get('strict_loading', False))
+            if strict_loading is None else bool(strict_loading)
+        )
 
         if domains is not None:
             print(f"Filtering by domains: {domains}")
@@ -76,6 +87,27 @@ class LargeScaleDepthDataset(Dataset):
                 'created_at': 'unknown',
                 'total_samples': len(self.rgb_paths),
             }
+
+        sample_id_file = Path(f'{prefix}_sample_id.npy')
+        image_sha_file = Path(f'{prefix}_image_sha256.npy')
+        self.sample_ids = (
+            np.load(sample_id_file, mmap_mode='r') if sample_id_file.exists() else None
+        )
+        self.image_sha256 = (
+            np.load(image_sha_file, mmap_mode='r') if image_sha_file.exists() else None
+        )
+        arrays = [self.rgb_paths, self.depth_paths, self.domains]
+        if self.sample_ids is not None:
+            arrays.append(self.sample_ids)
+        if self.image_sha256 is not None:
+            arrays.append(self.image_sha256)
+        if any(len(array) != len(self.rgb_paths) for array in arrays):
+            raise ValueError(f'Index array length mismatch for prefix: {prefix}')
+        declared = self.index_metadata.get('total_samples')
+        if declared is not None and int(declared) != len(self.rgb_paths):
+            raise ValueError(
+                f'Index metadata count {declared} != array count {len(self.rgb_paths)}'
+            )
 
         print(f"  {len(self.rgb_paths):,} samples (memory-mapped)")
 
@@ -115,12 +147,26 @@ class LargeScaleDepthDataset(Dataset):
                 rgb_path   = _as_str(self.rgb_paths[real_idx])
                 depth_path = _as_str(self.depth_paths[real_idx])
                 domain     = _as_str(self.domains[real_idx])
+                sample_id = (
+                    _as_str(self.sample_ids[real_idx])
+                    if self.sample_ids is not None else None
+                )
+                image_sha256 = (
+                    _as_str(self.image_sha256[real_idx])
+                    if self.image_sha256 is not None else None
+                )
 
                 rgb = self._load_rgb(rgb_path)
 
                 depth = None
+                depth_scale = 1.0
                 if depth_path:
-                    depth = self._load_depth(depth_path)
+                    depth, depth_scale = self._load_depth(
+                        depth_path,
+                        sample_id=sample_id,
+                        image_sha256=image_sha256,
+                        expected_hw=rgb.shape[:2],
+                    )
 
                 if self.transform:
                     rgb, depth = self.transform(rgb, depth)
@@ -136,11 +182,16 @@ class LargeScaleDepthDataset(Dataset):
                 if depth is not None:
                     depth_tensor = torch.from_numpy(depth).unsqueeze(0).contiguous()
                     output['depth'] = depth_tensor
+                    output['depth_scale'] = torch.tensor(depth_scale, dtype=torch.float32)
 
                 del rgb, depth
                 return output
 
             except Exception as e:
+                if self.strict_loading:
+                    raise RuntimeError(
+                        f"Strict dataset load failed at index {real_idx}: {rgb_path}"
+                    ) from e
                 if attempt == 0:
                     print(f"WARNING: Failed to load sample {real_idx} ({rgb_path}): {e}")
                 continue
@@ -155,19 +206,29 @@ class LargeScaleDepthDataset(Dataset):
         return {
             'image': torch.zeros(3, h, w, dtype=torch.uint8).contiguous(),
             'depth': torch.zeros(1, h, w, dtype=torch.uint16).contiguous(),
+            'depth_scale': torch.tensor(1.0, dtype=torch.float32),
             'domain': 'corrupted',
             'path': f'dummy_sample_{idx}',
         }
 
     def _load_rgb(self, path: str) -> np.ndarray:
-        if path.lower().endswith(('.jpg', '.jpeg')):
+        if path.lower().endswith(('.jpg', '.jpeg')) and self._jpeg is not None:
             with open(path, 'rb') as f:
                 return self._jpeg.decode(f.read(), pixel_format=TJPF_RGB)
         else:
             img = cv2.imread(path, cv2.IMREAD_COLOR)
+            if img is None:
+                raise FileNotFoundError(f"Cannot load: {path}")
             return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    def _load_depth(self, path: str) -> np.ndarray:
+    def _load_depth(
+        self,
+        path: str,
+        *,
+        sample_id: Optional[str] = None,
+        image_sha256: Optional[str] = None,
+        expected_hw: Optional[tuple[int, int]] = None,
+    ) -> tuple[np.ndarray, float]:
         path_lower = path.lower()
 
         if path_lower.endswith('.png'):
@@ -182,13 +243,59 @@ class LargeScaleDepthDataset(Dataset):
             else:
                 depth = (np.load(path) * 256.0).astype(np.uint16)
 
+        elif path_lower.endswith('.pt'):
+            if sample_id is None or image_sha256 is None or expected_hw is None:
+                raise ValueError(
+                    'Phase10B .pt cache requires sample_id, image_sha256, and RGB shape arrays'
+                )
+            try:
+                payload = torch.load(path, map_location='cpu', weights_only=True)
+            except Exception as error:
+                raise ValueError(f'Cannot load Phase10B cache entry: {path}') from error
+            if not isinstance(payload, dict) or set(payload) != {'metadata', 'depth'}:
+                raise ValueError('Phase10B cache payload schema mismatch')
+            metadata = payload['metadata']
+            depth_tensor = payload['depth']
+            expected_shape = [1, 1, int(expected_hw[0]), int(expected_hw[1])]
+            expected_metadata = {
+                'sample_id': sample_id,
+                'image_sha256': image_sha256,
+                'teacher_identity': self.index_metadata.get('teacher_identity'),
+                'cache_version': self.index_metadata.get('cache_version'),
+                'shape': expected_shape,
+                'dtype': 'float32',
+                'finite': True,
+            }
+            if not isinstance(metadata, dict):
+                raise ValueError('Phase10B cache metadata is not a dictionary')
+            for key, value in expected_metadata.items():
+                if value is None or metadata.get(key) != value:
+                    raise ValueError(
+                        f'Phase10B cache metadata mismatch for {key}: '
+                        f'{metadata.get(key)!r} != {value!r}'
+                    )
+            if (
+                not isinstance(depth_tensor, torch.Tensor)
+                or list(depth_tensor.shape) != expected_shape
+                or depth_tensor.dtype != torch.float32
+                or depth_tensor.requires_grad
+                or depth_tensor.grad_fn is not None
+                or not bool(torch.isfinite(depth_tensor).all().item())
+            ):
+                raise ValueError('Phase10B cache tensor failed shape/dtype/finite validation')
+            depth = depth_tensor.squeeze(0).squeeze(0).contiguous().numpy()
+            return depth, 1.0
+
         else:
             raise ValueError(f"Unsupported format: {path}")
 
         if depth.ndim == 3:
             depth = depth.squeeze()
 
-        return depth
+        # Legacy ZipDepth labels are encoded as uint16 values scaled by 256.
+        # Keep their old trainer semantics while allowing Phase10B float32 .pt
+        # labels to bypass this quantized path entirely.
+        return depth, 256.0
 
 
 class BalancedDomainSampler(torch.utils.data.Sampler):

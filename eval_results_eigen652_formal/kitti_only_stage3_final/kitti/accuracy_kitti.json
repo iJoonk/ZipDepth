@@ -1,0 +1,18 @@
+{
+  "metadata": {
+    "dataset": "kitti",
+    "checkpoint": "checkpoints/kitti_only_vanilla/stage3_512/final_model.pth",
+    "alignment": "least_square_disparity",
+    "timestamp": "2026-08-19 01:16:15"
+  },
+  "results": {
+    "abs_rel": 0.150357,
+    "sq_rel": 1.093458,
+    "rmse": 6.335905,
+    "rmse_log": 0.219303,
+    "log10": 0.066712,
+    "delta1": 0.780326,
+    "delta2": 0.935041,
+    "delta3": 0.980225
+  }
+}
